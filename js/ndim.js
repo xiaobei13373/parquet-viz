@@ -149,6 +149,55 @@ export function arrayStats(arr) {
 }
 
 /**
+ * Log dimensionless jerk（峰值速度归一化），越大越平滑。
+ * LDLj = -ln(T³ / vPeak² * ∫ jerk² dt)。位置输入先做一阶前向差分。
+ * 使用等间隔有限差分和矩形积分，与 siva82kb/smoothness 的速度实现一致：
+ * T = v.length * dt，因此 dt 在无量纲化后消去，DJ = m³ * Σ(Δ²(v/vPeak))²。
+ * 不跨越缺失点，不重采样；X 为空时默认等间隔。
+ */
+export function logDimensionlessJerk(y, x = null, inputType = 'position') {
+  const unavailable = reason => ({ value: NaN, reason })
+  if (!['position', 'velocity'].includes(inputType)) return unavailable('未知的信号类型')
+  const minPoints = inputType === 'position' ? 4 : 3
+  if (y.length < minPoints) return unavailable(`至少需要 ${minPoints} 个点`)
+  if (x && x.length !== y.length) return unavailable('X 与 Y 点数不一致')
+  for (let i = 0; i < y.length; i++) {
+    if (!Number.isFinite(y[i]) || (x && !Number.isFinite(x[i]))) {
+      return unavailable('数据含缺失值或非有限值')
+    }
+  }
+  if (x) {
+    const dt = (x[x.length - 1] - x[0]) / (x.length - 1)
+    if (!(dt > 0) || !Number.isFinite(dt)) return unavailable('X 轴必须严格递增')
+    for (let i = 1; i < x.length; i++) {
+      const step = x[i] - x[i - 1]
+      // 相对容差加浮点数精度容差，兼容时间戳和小数采样时间。
+      const tolerance = Math.max(dt * 1e-4, Number.EPSILON * Math.max(Math.abs(x[i]), Math.abs(x[i - 1])) * 4)
+      if (!(step > 0)) return unavailable('X 轴必须严格递增')
+      if (Math.abs(step - dt) > tolerance) return unavailable('X 轴需等间隔采样')
+    }
+  }
+  const m = y.length - (inputType === 'position' ? 1 : 0)
+  const velocityAt = i => inputType === 'position' ? y[i + 1] - y[i] : y[i]
+  let peak = 0
+  for (let i = 0; i < m; i++) peak = Math.max(peak, Math.abs(velocityAt(i)))
+  if (!Number.isFinite(peak)) return unavailable('数值超出计算范围')
+  if (peak === 0) return unavailable('峰值速度为 0，LDLj 未定义')
+  let scale = 0, sumSquares = 0
+  for (let i = 2; i < m; i++) {
+    const diff = Math.abs((velocityAt(i) / peak - velocityAt(i - 1) / peak) -
+      (velocityAt(i - 1) / peak - velocityAt(i - 2) / peak))
+    if (diff > scale) {
+      sumSquares = 1 + sumSquares * (scale / diff) ** 2
+      scale = diff
+    } else if (diff > 0) sumSquares += (diff / scale) ** 2
+  }
+  // 在对数域组合，避免 m³ 和极小 jerk 的平方溢出/下溢；不加任意 epsilon。
+  if (scale === 0) return { value: Infinity, reason: '离散 jerk 为 0（+∞）' }
+  return { value: -(3 * Math.log(m) + 2 * Math.log(scale) + Math.log(sumSquares)), reason: '' }
+}
+
+/**
  * min-max 降采样：返回保留的下标数组（保尖峰）。
  * 数据量不超过 maxPoints 时返回 null 表示全部保留。
  */

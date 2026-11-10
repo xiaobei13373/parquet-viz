@@ -22,6 +22,13 @@ Pure static site — files are parsed locally in your browser and never uploaded
 - LIST 列自动推断形状；自动识别文件元数据中的 `shapes` 形状提示
 - 文件监视：磁盘文件变化时自动刷新（Chrome/Edge）
 - min-max 降采样保尖峰、统计栏、PNG / CSV 导出
+- 无量纲平滑度 LDLj（越大越平滑）：默认位置／关节角输入，可切换速度；完整原始数据计算，多曲线时统计首条并显示名称
+
+LDLj 采用峰值速度归一化与自然对数：`−ln(T³ / vPeak² × ∫ jerk² dt)`。位置输入先求一阶差分速度，再求二阶差分 jerk（位置至少 4 点，速度至少 3 点）。角度应先展开以去除周期跳变。
+
+等间隔离散实现沿用 [smoothness 的速度实现](https://github.com/siva82kb/smoothness/blob/master/python/smoothness.py)：`LDLj = −ln(m³ × Σ(Δ²(v/vPeak))²)`，m 为速度序列长度；位置输入 m=N−1，速度输入 m=N。采用 T=mΔt 和矩形积分，采样间隔在无量纲化后消去，无需输入采样率。支持 X 轴等间隔检查（相对容差 0.01%，另考虑浮点精度），无显式 X 时默认等间隔。均匀缩放时间或幅值不改变结果；采样密度、噪声仍影响结果，数据不自动滤波。
+
+缺失值、非递增或不等间隔 X 会显示原因；零峰值速度时未定义，非零峰值速度但离散 jerk 为 0 时显示 `+∞`。缩放图表不改变统计范围。
 
 ## Usage / 使用
 

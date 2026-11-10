@@ -1,6 +1,6 @@
 // parquet-viz 主控制器
 import { asyncBufferFromFile, asyncBufferFromBuffer, openParquet, openParquetUrl, loadColumn } from './parquet-loader.js'
-import { extractSlice, sampleAxisExtent, arrayStats, validShape, parseShapeInput, shapeProduct } from './ndim.js'
+import { extractSlice, sampleAxisExtent, arrayStats, logDimensionlessJerk, validShape, parseShapeInput, shapeProduct } from './ndim.js'
 import { renderChart, exportPng, exportCsv } from './plot.js'
 
 const $ = id => document.getElementById(id)
@@ -17,6 +17,7 @@ const state = {
   watch: { handle: null, timer: null, lastModified: 0, size: 0 },
   lastSeries: [],
   lastXLabel: 'x',
+  smoothnessInput: 'position',
   renderSeq: 0,
 }
 
@@ -478,13 +479,25 @@ async function renderNow() {
 
 function updateStats(series) {
   const bar = $('stats-bar')
+  bar.replaceChildren()
   if (series.length === 0) {
     bar.textContent = '勾选左侧字段开始可视化；LIST 列可点击切换维度'
     return
   }
   const s = arrayStats(series[0].y)
+  const smooth = logDimensionlessJerk(series[0].y, series[0].x, state.smoothnessInput)
   const extra = series.length > 1 ? ` · 共 ${series.length} 条曲线（统计为首条）` : ''
-  bar.textContent = `点数 ${s.count.toLocaleString()} · 最小 ${fmtNum(s.min)} · 最大 ${fmtNum(s.max)} · 均值 ${fmtNum(s.mean)} · 标准差 ${fmtNum(s.std)}${extra}`
+  const summary = document.createElement('div')
+  summary.textContent = `点数 ${s.count.toLocaleString()} · 最小 ${fmtNum(s.min)} · 最大 ${fmtNum(s.max)} · 均值 ${fmtNum(s.mean)} · 标准差 ${fmtNum(s.std)}${extra}`
+  const detail = document.createElement('div')
+  detail.className = 'smoothness-stats'
+  const value = smooth.value === Infinity ? '+∞' : fmtNum(smooth.value)
+  detail.textContent = `平滑度 LDLj ${value}（无量纲，越大越平滑）${smooth.reason ? ` · ${smooth.reason}` : ''}`
+  detail.title = 'LDLj = −ln(T³ / v峰值² × ∫ jerk² dt)。位置／关节角先求速度，再求 jerk；使用自然对数与峰值速度归一化。'
+  const hint = document.createElement('div')
+  hint.className = 'hint'
+  hint.textContent = `统计曲线：${series[0].name} · ${state.smoothnessInput === 'position' ? '位置／关节角' : '速度'}输入 · 完整原始数据，等间隔采样，未滤波；缩放不改变统计。`
+  bar.append(summary, detail, hint)
 }
 
 // ---------- 文件监视（实时刷新） ----------
@@ -534,6 +547,10 @@ function stopWatch(clearBadge = true) {
 
 // ---------- 事件绑定 ----------
 function bindEvents() {
+  $('smoothness-input').addEventListener('change', () => {
+    state.smoothnessInput = $('smoothness-input').value
+    updateStats(state.lastSeries)
+  })
   $('btn-open').addEventListener('click', () => $('file-input').click())
   $('file-input').addEventListener('change', e => {
     if (e.target.files[0]) openFile(e.target.files[0])

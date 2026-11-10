@@ -2,7 +2,7 @@
 import assert from 'node:assert'
 import {
   columnToFlat, inferShape, stridesFor, validShape, parseShapeInput,
-  extractSlice, sampleAxisExtent, arrayStats, decimateIndices, toNum,
+  extractSlice, sampleAxisExtent, arrayStats, logDimensionlessJerk, decimateIndices, toNum,
 } from '../js/ndim.js'
 
 // toNum
@@ -82,6 +82,38 @@ assert.deepEqual(sampleAxisExtent(100, 3), [0, 50, 99])
   assert.equal(s.min, 1)
   assert.equal(s.max, 5)
   assert.equal(s.mean, 2.75)
+}
+
+// LDLj：已知解析差分、参考速度公式、不变性和不可计算条件。
+{
+  const close = (actual, expected) => assert.ok(Math.abs(actual - expected) < 1e-10, `${actual} != ${expected}`)
+  // p=t³，离散速度 [1,7,19,37]，离散 jerk [6,6]。
+  const p = [0, 1, 8, 27, 64]
+  const expected = -Math.log(4 ** 3 * (6 ** 2 + 6 ** 2) / 37 ** 2)
+  close(logDimensionlessJerk(p).value, expected)
+  close(logDimensionlessJerk([1, 7, 19, 37], null, 'velocity').value, expected)
+  close(logDimensionlessJerk(p.map(v => -v * 3 + 100)).value, expected)
+  close(logDimensionlessJerk(p.map(v => v * 1e200)).value, expected)
+  close(logDimensionlessJerk(p.map(v => v * 1e-200)).value, expected)
+  close(logDimensionlessJerk(p, [0, 1, 2, 3, 4]).value, expected)
+  close(logDimensionlessJerk(p, [1000, 1010, 1020, 1030, 1040]).value, expected)
+  close(logDimensionlessJerk(p, [0, 0.1, 0.2, 0.3, 0.4]).value, expected)
+  // 作者参考实现的速度示例（np.arange(-1,1,0.01), exp(-5*t²)）。
+  const gaussian = Array.from({ length: 200 }, (_, i) => Math.exp(-5 * (-1 + i * 0.01) ** 2))
+  assert.ok(Math.abs(logDimensionlessJerk(gaussian, null, 'velocity').value - (-5.81636)) < 5e-6)
+  assert.equal(logDimensionlessJerk([0, 1, 2, 3]).value, Infinity)
+  assert.equal(logDimensionlessJerk([2, 2, 2], null, 'velocity').value, Infinity)
+  for (const y of [[], [1], [1, 2, 3], [0, 0, 0, 0], [0, 1, NaN, 3], [0, 1, Infinity, 3]]) {
+    const result = logDimensionlessJerk(y)
+    assert.ok(Number.isNaN(result.value))
+    assert.ok(result.reason)
+  }
+  for (const x of [[0, 1], [0, 1, 1, 3, 4], [4, 3, 2, 1, 0], [0, 1, 2, 4, 5], [0, 1, NaN, 3, 4]]) {
+    assert.ok(Number.isNaN(logDimensionlessJerk(p, x).value))
+  }
+  const smooth = Array.from({ length: 100 }, (_, i) => Math.sin(i / 100))
+  const noisy = smooth.map((v, i) => v + (i % 2 ? 0.001 : -0.001))
+  assert.ok(logDimensionlessJerk(smooth).value > logDimensionlessJerk(noisy).value)
 }
 
 // decimateIndices

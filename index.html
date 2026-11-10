@@ -73,6 +73,12 @@
           <div class="rotate-wrap">旋转：<span id="rotate-buttons"></span></div>
         </div>
 
+        <label class="smoothness-control">LDLj 输入
+          <select id="smoothness-input" aria-label="LDLj 输入类型">
+            <option value="position">位置／关节角</option>
+            <option value="velocity">速度</option>
+          </select>
+        </label>
         <div class="toolbar-right">
           <button id="btn-reset-zoom" class="btn mini" title="重置缩放">重置缩放</button>
           <button id="btn-png" class="btn mini" title="导出当前图为 PNG">PNG</button>
@@ -116,6 +122,9 @@
         <li><b>对比维度</b>：沿该维度均匀取样，叠加最多 24 条曲线便于对比。</li>
       </ul>
       <h3>性能与导出</h3>
+      <p><b>平滑度 LDLj</b>：采用自然对数和峰值速度归一化，<code>LDLj = −ln(T³ / v峰值² × ∫ jerk² dt)</code>，无量纲，数值越大越平滑。默认将 Y 作为位置／关节角，一阶差分得到速度，再对速度做二阶差分得到 jerk；若 Y 已是速度，请切换「LDLj 输入」。位置至少需要 4 点，速度至少需要 3 点。角度应先展开，避免 ±π 或 360° 跳变影响结果。</p>
+      <p>计算使用完整原始数据，未滤波，多曲线时统计首条并显示名称。要求数据有限且 X 严格递增、等间隔（间隔相对容差 0.01%，另考虑浮点精度）；无显式 X 时默认等间隔。缺失点或不等间隔时显示原因，不跳过或插值。零运动的峰值速度为 0，指标未定义；非零峰值速度但离散 jerk 为 0 时为 +∞。均匀缩放时间或幅值不会改变 LDLj，但采样密度和噪声会影响数值。</p>
+      <p>离散约定：速度序列长度为 m，采样间隔为 Δt，T = mΔt，积分用差分 jerk 的平方和乘 Δt；因此可化简为 <code>LDLj = −ln(m³ × Σ(Δ²(v/v峰值))²)</code>，不必输入采样率。位置输入有 m = N−1 个速度样本，T = (N−1)Δt；速度输入有 m = N 个样本，T = NΔt。实现参考 <a href="https://github.com/siva82kb/smoothness/blob/master/python/smoothness.py" target="_blank" rel="noopener noreferrer">smoothness 的 LDLj 速度实现</a>。</p>
       <p>超过 6000 点的曲线会自动做 min-max 降采样（保留尖峰），缩放后统计仍基于完整数据。工具栏可导出 PNG 图片或当前曲线 CSV。</p>
       <h3>隐私</h3>
       <p>纯静态网页，文件仅在浏览器内存中解析，不会上传。</p>
