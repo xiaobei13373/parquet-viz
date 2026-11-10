@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Parquet Viz · 多维曲线可视化</title>
   <meta name="description" content="在浏览器中直接打开 Parquet 文件，实时曲线可视化，支持 N 维重塑与维度旋转切片。无需上传，纯本地解析。">
-  <link rel="stylesheet" href="css/style.css">
+  <link rel="stylesheet" href="css/style.css?v=joint-names-1">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23101624'/%3E%3Cpath d='M4 22 L11 14 L16 18 L23 8 L28 12' stroke='%234fc3f7' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
   <script src="vendor/plotly-basic.min.js"></script>
 </head>
@@ -21,6 +21,8 @@
       <button id="btn-open" class="btn primary">打开文件</button>
       <button id="btn-watch" class="btn" title="文件变化时自动刷新（Chrome/Edge）">打开并监视</button>
       <button id="btn-demo" class="btn">示例数据</button>
+      <input type="file" id="joint-info-input" accept=".json,application/json" hidden>
+      <button id="btn-joint-info" class="btn" title="选择数据集 meta/info.json，读取关节名称">加载关节名称</button>
       <div class="url-box">
         <input type="text" id="url-input" placeholder="或粘贴 Parquet URL（需 CORS）">
         <button id="btn-url" class="btn">加载</button>
@@ -48,6 +50,7 @@
       <section class="panel grow">
         <h2>字段 <span class="hint">勾选画曲线 · LIST 列点击进入多维</span></h2>
         <ul id="column-list" class="column-list"></ul>
+        <p id="joint-info-status" class="hint joint-info-status">数组列中的关节名称可通过「加载关节名称」读取数据集 meta/info.json。</p>
       </section>
     </aside>
 
@@ -115,6 +118,7 @@
       <h3>字段曲线</h3>
       <p>在左侧勾选数值字段作为 Y，X 轴可选行号或另一个数值字段（如时间列）。支持多曲线叠加、框选缩放、滚轮缩放、双击复位。</p>
       <h3>多维切片（维度旋转）</h3>
+      <p><b>关节名称</b>：点击「加载关节名称」，选择同一数据集的 <code>meta/info.json</code>，再选择 action 或 observation.state。读取一维特征的 names，按原始索引对应关节。在 [帧, 关节] 形状下，关节下拉框、图例、悬停提示、统计栏及 CSV 表头显示实际名称。加载名称后默认沿帧轴展示轨迹，关节对比可叠加最多 64 条。名称配置保留至页面刷新，切换数据集时应加载对应配置；不匹配形状时不使用名称。</p>
       <p>类似 HDF5 查看器：LIST 列会自动推断形状（如 <code>[行数, 通道数]</code>）；普通扁平列可手动重塑为任意 N 维形状（各维度乘积 = 元素总数，文件元数据中的 <code>shapes</code> 键会被自动识别）。</p>
       <ul>
         <li><b>X 轴维度</b>：选择哪个维度作为曲线横轴；「X ⇄ 维度d」按钮可快速旋转交换轴。</li>
@@ -131,6 +135,6 @@
     </div>
   </div>
 
-  <script type="module" src="js/app.js"></script>
+  <script type="module" src="js/app.js?v=joint-names-1"></script>
 </body>
 </html>

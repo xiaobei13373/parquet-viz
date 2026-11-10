@@ -1,10 +1,12 @@
 // parquet-viz 主控制器
 import { asyncBufferFromFile, asyncBufferFromBuffer, openParquet, openParquetUrl, loadColumn } from './parquet-loader.js'
 import { extractSlice, sampleAxisExtent, arrayStats, logDimensionlessJerk, validShape, parseShapeInput, shapeProduct } from './ndim.js'
-import { renderChart, exportPng, exportCsv } from './plot.js'
+import { renderChart, exportPng, exportCsv } from './plot.js?v=joint-names-1'
+import { readJointNames, jointNamesForShape } from './joint-names.js'
 
 const $ = id => document.getElementById(id)
 const MAX_SERIES = 24
+const MAX_NAMED_SERIES = 64
 
 const state = {
   pq: null,
@@ -18,6 +20,7 @@ const state = {
   lastSeries: [],
   lastXLabel: 'x',
   smoothnessInput: 'position',
+  jointNames: new Map(),
   renderSeq: 0,
 }
 
@@ -257,6 +260,34 @@ function setMode(mode) {
 }
 
 // ---------- 多维切片 ----------
+function currentJointNames(column = state.nd.column, shape = state.nd.shape) {
+  return jointNamesForShape(state.jointNames, column, shape)
+}
+
+function seriesIndices(nd) {
+  const cap = currentJointNames() && nd.seriesAxis === 1 ? MAX_NAMED_SERIES : MAX_SERIES
+  return sampleAxisExtent(nd.shape[nd.seriesAxis], cap)
+}
+
+async function importJointNames(file) {
+  try {
+    const names = readJointNames(JSON.parse(await file.text()))
+    if (!names.size) throw new Error('未找到有效的一维 features.*.names，名称数量需与 shape 一致')
+    state.jointNames = names
+    $('joint-info-status').textContent = `名称配置：${file.name}（${names.size} 列）`
+    $('joint-info-status').title = [...names].map(([column, labels]) => `${column}：${labels.length} 个名称`).join('\n')
+    if (state.nd.column) {
+      // 读取名称后默认沿帧轴展示关节轨迹。
+      if (currentJointNames() && state.nd.xAxis === 1) rotateTo(0)
+      else buildNdControls()
+    }
+    scheduleRender()
+    toast('关节名称已加载；在多维切片中选择 action 或 observation.state')
+  } catch (err) {
+    toast(`名称配置加载失败：${err.message}`, true)
+  }
+}
+
 async function selectNdColumn(name, restore = null) {
   if (!state.pq || !name) return
   const seq = ++state.renderSeq
@@ -270,7 +301,8 @@ async function selectNdColumn(name, restore = null) {
     else if (hint && validShape(hint, total)) shape = hint
     else shape = data.shape
 
-    const xAxis = restore && restore.xAxis < shape.length ? restore.xAxis : shape.length - 1
+    const xAxis = restore && restore.xAxis < shape.length ? restore.xAxis
+      : currentJointNames(name, shape) ? 0 : shape.length - 1
     state.nd = {
       column: name,
       shape: [...shape],
@@ -291,6 +323,7 @@ async function selectNdColumn(name, restore = null) {
 
 function buildNdControls() {
   const { shape, xAxis, seriesAxis, fixed, column } = state.nd
+  const jointNames = currentJointNames()
   $('shape-input').value = shape.join(', ')
   const total = state.cache.get(column)?.flat.length ?? shapeProduct(shape)
   $('shape-info').textContent = `共 ${total.toLocaleString()} 个元素 · ${shape.length} 维`
@@ -301,7 +334,7 @@ function buildNdControls() {
   shape.forEach((ext, d) => {
     const opt = document.createElement('option')
     opt.value = String(d)
-    opt.textContent = `维度 ${d}（长度 ${ext}）`
+    opt.textContent = `${jointNames ? (d === 0 ? '帧' : '关节') + ' · ' : ''}维度 ${d}（长度 ${ext}）`
     xSel.appendChild(opt)
   })
   xSel.value = String(xAxis)
@@ -313,7 +346,8 @@ function buildNdControls() {
     if (d === xAxis) return
     const opt = document.createElement('option')
     opt.value = String(d)
-    opt.textContent = `维度 ${d}（叠加 ${Math.min(ext, MAX_SERIES)} 条）`
+    const cap = jointNames && d === 1 ? MAX_NAMED_SERIES : MAX_SERIES
+    opt.textContent = `${jointNames && d === 1 ? '关节 · ' : ''}维度 ${d}（叠加 ${Math.min(ext, cap)} 条）`
     sSel.appendChild(opt)
   })
   sSel.value = String(seriesAxis)
@@ -343,18 +377,40 @@ function buildNdControls() {
     extSpan.className = 'slider-ext'
     extSpan.textContent = `/ ${ext - 1}`
 
+    let jointSelect = null
+    if (jointNames && d === 1) {
+      label.textContent = '关节'
+      jointSelect = document.createElement('select')
+      jointSelect.className = 'joint-select'
+      jointSelect.setAttribute('aria-label', '选择关节')
+      jointNames.forEach((name, i) => {
+        const option = document.createElement('option')
+        option.value = String(i)
+        option.textContent = `${i} · ${name}`
+        jointSelect.appendChild(option)
+      })
+      jointSelect.value = range.value
+      jointSelect.title = jointNames[Number(range.value)]
+    }
+
     const onInput = v => {
       let i = Math.max(0, Math.min(ext - 1, Math.round(Number(v) || 0)))
       range.value = String(i)
       num.value = String(i)
       state.nd.fixed[d] = i
+      if (jointSelect) {
+        jointSelect.value = String(i)
+        jointSelect.title = jointNames[i]
+      }
       scheduleRender()
     }
     range.addEventListener('input', () => onInput(range.value))
     num.addEventListener('change', () => onInput(num.value))
     num.addEventListener('keydown', e => { if (e.key === 'Enter') onInput(num.value) })
+    jointSelect?.addEventListener('change', () => onInput(jointSelect.value))
 
     row.append(label, range, num, extSpan)
+    if (jointSelect) row.appendChild(jointSelect)
     box.appendChild(row)
   })
 
@@ -420,7 +476,9 @@ function scheduleRender() {
 function sliceLabel(nd, extraFixed = null) {
   const fixed = extraFixed ?? nd.fixed
   const parts = nd.shape.map((_, d) => (d === nd.xAxis ? ':' : String(fixed[d])))
-  return `${nd.column}[${parts.join(', ')}]`
+  const names = currentJointNames(nd.column, nd.shape)
+  const joint = names && nd.xAxis !== 1 ? names[fixed[1]] : null
+  return `${joint ? joint + ' · ' : ''}${nd.column}[${parts.join(', ')}]`
 }
 
 async function renderNow() {
@@ -451,14 +509,14 @@ async function renderNow() {
       const data = await ensureColumn(nd.column)
       if (seq !== state.renderSeq) return
       yLabel = nd.column
-      xLabel = `维度 ${nd.xAxis}（索引）`
+      xLabel = currentJointNames() && nd.xAxis === 0 ? '帧（索引）' : `维度 ${nd.xAxis}（索引）`
       if (nd.seriesAxis >= 0) {
-        const indices = sampleAxisExtent(nd.shape[nd.seriesAxis], MAX_SERIES)
+        const indices = seriesIndices(nd)
         for (const s of indices) {
           const fixed = [...nd.fixed]
           fixed[nd.seriesAxis] = s
           const y = extractSlice(data.flat, nd.shape, nd.xAxis, fixed)
-          series.push({ name: `${nd.column}[${nd.seriesAxis}=${s}]`, x: null, y })
+          series.push({ name: sliceLabel(nd, fixed), x: null, y })
         }
       } else {
         const y = extractSlice(data.flat, nd.shape, nd.xAxis, nd.fixed)
@@ -469,7 +527,10 @@ async function renderNow() {
     if (seq !== state.renderSeq) return
     state.lastSeries = series
     state.lastXLabel = xLabel
-    renderChart($('chart'), series, { xLabel, yLabel, xType, uirevision: String(state.uirev) })
+    renderChart($('chart'), series, {
+      xLabel, yLabel, xType, uirevision: String(state.uirev),
+      namedSeries: state.mode === 'ndim' && Boolean(currentJointNames()) && series.length > 1,
+    })
     updateStats(series)
   } catch (err) {
     console.error(err)
@@ -547,6 +608,11 @@ function stopWatch(clearBadge = true) {
 
 // ---------- 事件绑定 ----------
 function bindEvents() {
+  $('btn-joint-info').addEventListener('click', () => $('joint-info-input').click())
+  $('joint-info-input').addEventListener('change', e => {
+    if (e.target.files[0]) importJointNames(e.target.files[0])
+    e.target.value = ''
+  })
   $('smoothness-input').addEventListener('change', () => {
     state.smoothnessInput = $('smoothness-input').value
     updateStats(state.lastSeries)

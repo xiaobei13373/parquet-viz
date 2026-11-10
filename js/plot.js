@@ -53,6 +53,10 @@ export function renderChart(div, series, opts = {}) {
 
   const layout = {
     ...LAYOUT_BASE,
+    ...(opts.namedSeries ? {
+      margin: { ...LAYOUT_BASE.margin, r: 300 },
+      legend: { ...LAYOUT_BASE.legend, orientation: 'v', x: 1.02, y: 1, font: { size: 10 } },
+    } : {}),
     uirevision: opts.uirevision ?? 'keep',
     xaxis: { ...LAYOUT_BASE.xaxis, title: { text: opts.xLabel ?? '' }, type: opts.xType ?? '-' },
     yaxis: { ...LAYOUT_BASE.yaxis, title: { text: opts.yLabel ?? '' } },
